@@ -1,0 +1,28 @@
+{
+  "$schema": "https://claude.ai/schemas/claude-plugin.json",
+  "name": "clowder-mcp",
+  "displayName": "Clowder",
+  "version": "0.1.0",
+  "description": "MCP server for interacting with Clowder data management platform",
+  "author": "RE-MAT",
+  "repository": "https://github.com/re-mat/clowder-mcp",
+
+  "mcpServers": {
+    "clowder": {
+      "type": "stdio",
+      "command": "uv",
+      "args": ["run", "--directory", "${CLAUDE_PLUGIN_ROOT}/mcp", "clowder-mcp"],
+      "env": {
+        "CLOWDER_URL": {
+          "description": "Base URL of the Clowder instance",
+          "required": true
+        },
+        "CLOWDER_KEY": {
+          "description": "API key for Clowder authentication",
+          "required": true,
+          "secret": true
+        }
+      }
+    }
+  }
+}
