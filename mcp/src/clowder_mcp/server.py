@@ -5,7 +5,6 @@ import random
 from typing import Any
 
 from fastmcp import FastMCP
-from genson import SchemaBuilder
 from pyclowder.client import ClowderClient
 
 mcp = FastMCP("clowder")
@@ -134,22 +133,16 @@ def get_dataset(dataset_id: str) -> dict:
 
 @mcp.tool()
 def get_dataset_metadata(dataset_id: str) -> list[dict]:
-    """Get user-defined (scientific) metadata attached to a dataset.
+    """Get user-defined metadata attached to a dataset.
 
     Returns all metadata records including content and provenance (who added it,
-    when, and via which extractor). For DSC Cure Kinetics datasets the content
-    typically includes:
-      - Batch ID and procedure details (operator, mix date/time, storage conditions)
-      - Input materials: monomers (DCPD, ENB), catalysts (Grubbs generations),
-        inhibitors (DHF, BHT), and solvents with masses/moles/ratios
-      - DSC analysis results: Enthalpy (J/g), Peak temperature (°C), Onset x (°C)
-      - Instrument parameters: ramp rate, temperature range, sample mass
+    when, and via which extractor).
 
     Args:
         dataset_id: The ID of the dataset.
 
     Returns:
-        A list of metadata records. Each record has 'content' (the scientific data)
+        A list of metadata records. Each record has 'content' (the domain-specific data)
         and provenance fields (id, attached_to, created_at, agent).
     """
     client = get_clowder_client()
@@ -190,50 +183,6 @@ def get_dataset_files(dataset_id: str) -> list[dict]:
         }
         for f in files
     ]
-
-
-@mcp.tool()
-def get_schema_for_space(space_id: str) -> dict:
-    """Infer a JSON schema from sampled datasets in a space.
-
-    Samples up to 5 random datasets and combines their scientific metadata
-    (from metadata.jsonld) to infer a common schema using GenSON.
-
-    Args:
-        space_id: The ID of the space.
-
-    Returns:
-        A JSON schema representing the structure of scientific metadata
-        (the 'content' field) found in the sampled datasets.
-    """
-    datasets = _get_datasets_for_space(space_id)
-    if not datasets:
-        return {"type": "object", "properties": {}}
-
-    sample_size = min(5, len(datasets))
-    sampled_ids = random.sample([d["id"] for d in datasets if d.get("id")], sample_size)
-
-    client = get_clowder_client()
-    builder = SchemaBuilder()
-    sampled = 0
-
-    for dataset_id in sampled_ids:
-        try:
-            records = _safe_get(client, f"/datasets/{dataset_id}/metadata.jsonld")
-            if not isinstance(records, list):
-                continue
-            for rec in records:
-                content = rec.get("content")
-                if isinstance(content, dict):
-                    builder.add_object(content)
-                    sampled += 1
-        except RuntimeError:
-            continue  # skip datasets whose metadata cannot be fetched
-
-    if sampled == 0:
-        return {"type": "object", "properties": {}, "note": "No metadata content found in sample"}
-
-    return builder.to_schema()
 
 
 # ---------------------------------------------------------------------------
@@ -283,6 +232,7 @@ def _search_in_space(
             "name": r.get("name"),
             "description": r.get("description", ""),
             "created": r.get("created"),
+            "spaces": r.get("spaces", []),
             "url": f"{base_url}/datasets/{r.get('id')}",
         }
         for r in raw_results
@@ -309,25 +259,17 @@ def search_in_space(
     """Search resources in a space using full-text keyword search backed by ElasticSearch.
 
     The Clowder search indexes all text fields including names, descriptions,
-    and all scientific metadata content. Use plain keywords or scientific terms.
-
-    Query tips (based on RE-Mat / DSC Cure Kinetics space):
-      - Chemical names:       "DCPD", "ENB", "Grubbs", "DHF", "BHT"
-      - Catalyst generations: "G1", "G2", "G3" or "1st generation", "2nd generation"
-      - Experiment types:     "DSC", "cure kinetics"
-      - Formulation terms:    "ppm", "mol%", "inert", "ionox"
-      - Operator / batch IDs: use the specific batch ID or operator initials
+    and all metadata content. Use plain keywords or domain-specific terms.
 
     Pagination: use from_index and size to page through large result sets.
     The returned 'total_size' tells you how many resources matched in total.
 
     Args:
-        query:         A keyword or phrase (the value) to search for.
+        query:         A keyword or phrase to search for.
         space_id:      The ID of the space to search within.
         resource_type: Filter by resource type: "dataset", "file", or "collection".
                        Pass None to search across all resource types (default: "dataset").
-        field:         Optional metadata field name to restrict the search to, e.g.
-                       "remat_experiment_from_excel.procedure.general.Operator Initials".
+        field:         Optional metadata field name to restrict the search to.
                        When omitted, all indexed fields are searched.
         from_index:    Zero-based offset for pagination (default 0).
         size:          Number of results to return per page (default 20, max 240).
@@ -337,7 +279,7 @@ def search_in_space(
           - 'total_size': total number of matching resources
           - 'count': number returned in this page
           - 'from_index': the offset used
-          - 'results': list of dicts, each with id, name, description, created, url
+          - 'results': list of dicts, each with id, name, description, created, spaces, url
     """
     return _search_in_space(query, space_id, resource_type, field, from_index, size)
 
@@ -346,19 +288,9 @@ def search_in_space(
 def get_metadata_fields(space_id: str, sample_size: int = 5) -> dict:
     """Discover metadata field names and sample values by sampling datasets in a space.
 
-    Samples datasets from the space, fetches their scientific metadata, and returns
-    a flattened view of all metadata field paths with example values. This is useful
-    for understanding what terms to use when calling search_datasets_in_space.
-
-    For the DSC Cure Kinetics space, typical fields include:
-      - Batch ID
-      - procedure.general.operator, .mix_date, .storage_conditions, .mixing_type
-      - inputs.monomers.monomer-inputs[].name  (e.g. "DCPD", "ENB")
-      - inputs.catalysts.catalyst-inputs[].name  (e.g. "Grubbs 1st/2nd/3rd generation")
-      - inputs.inhibitors.inhibitor-inputs[].name  (e.g. "DHF", "BHT", "ionox")
-      - inputs.solvents.solvent-inputs[].name
-      - DSC Procedure.Experiment Type, .Ramp rate (°C/min), .Sample Name
-      - Analysis.Enthalpy (normalized)(J/g), .Peak temperature (°C), .Onset x (°C)
+    Samples datasets from the space, fetches their metadata, and returns a flattened
+    view of all metadata field paths with example values. This is useful for
+    understanding what field names and terms to use when calling search_in_space.
 
     Args:
         space_id:    The ID of the space.
