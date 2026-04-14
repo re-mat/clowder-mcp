@@ -1,4 +1,5 @@
 ---
+name: remat clowder
 description: >
   Use this skill when the user asks about RE-Mat data, wants to search or explore
   experimental datasets on the RE-Mat Clowder platform, or asks about materials
