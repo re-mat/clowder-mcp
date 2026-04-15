@@ -245,3 +245,9 @@ clowder-mcp/
 | `fastmcp` | MCP server framework |
 | `pyclowder` | Clowder REST API client |
 | `genson` | JSON schema inference (used internally) |
+
+
+## Acknowledgements
+This work was supported as part of the Regenerative Energy-Efficient Manufacturing of Thermoset Polymeric 
+Materials (REMAT), an Energy Frontier Research Center funded by the U.S. Department of Energy, Office of Science, 
+Basic Energy Sciences at the <insert name of university> under award #DE-SC0023457.
