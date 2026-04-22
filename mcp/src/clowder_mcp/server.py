@@ -97,6 +97,8 @@ def _get_datasets_for_space(space_id: str) -> list[dict]:
 @mcp.tool()
 def list_datasets_in_space(space_id: str) -> list[dict]:
     """List all datasets in a space with their name, id, description, and dates.
+       Do not use this tool if you need a count of datasets.
+       Always use count_datasets_in_space for that.
 
     Args:
         space_id: The ID of the space.
@@ -114,6 +116,19 @@ def list_datasets_in_space(space_id: str) -> list[dict]:
         }
         for d in datasets
     ]
+
+@mcp.tool()
+def count_datasets_in_space(space_id: str) -> int:
+    """ Count all datasets in a space.
+        Use this tool to find the total number of datasets in a space.
+
+    Args:
+        space_id: The ID of the space.
+
+    Returns:
+        Number of datasets
+    """
+    return len(_get_datasets_for_space(space_id))
 
 
 @mcp.tool()
@@ -258,6 +273,8 @@ def search_in_space(
 ) -> dict:
     """Search resources in a space using full-text keyword search backed by ElasticSearch.
 
+    Don't use this tool with a wildcard query. Use datasets_in_space instead
+
     The Clowder search indexes all text fields including names, descriptions,
     and all metadata content. Use plain keywords or domain-specific terms.
 
@@ -283,6 +300,53 @@ def search_in_space(
     """
     return _search_in_space(query, space_id, resource_type, field, from_index, size)
 
+
+@mcp.tool()
+def search_in_space_count(
+    query: str,
+    space_id: str,
+    resource_type: str | None = "dataset",
+    field: str | None = None,
+) -> int:
+    """Return the number of datasets in a space that match a full-text keyword search
+    backed by ElasticSearch.
+
+    Don't use this tool with a wildcard query. Use count_datasets_in_space instead
+
+    The Clowder search indexes all text fields including names, descriptions,
+    and all metadata content. Use plain keywords or domain-specific terms.
+
+
+    Args:
+        query:         A keyword or phrase to search for.
+        space_id:      The ID of the space to search within.
+        resource_type: Filter by resource type: "dataset", "file", or "collection".
+                       Pass None to search across all resource types (default: "dataset").
+        field:         Optional metadata field name to restrict the search to.
+                       When omitted, all indexed fields are searched.
+    Returns:
+        The number of datasets that match the query
+    """
+    from_index = 0
+    size = 20
+    total_count = 0
+    while True:
+        response = _search_in_space(
+            query=query,
+            space_id=space_id,
+            resource_type=resource_type,
+            field=field,
+            from_index=from_index,
+            size=size,
+        )
+
+        results = response.get("results", response) if isinstance(response, dict) else response
+        if not results:
+            break
+        total_count += len(results)
+        from_index += size
+
+    return total_count
 
 @mcp.tool()
 def get_metadata_fields(space_id: str, sample_size: int = 5) -> dict:
