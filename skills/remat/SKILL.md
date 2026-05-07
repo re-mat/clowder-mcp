@@ -51,11 +51,44 @@ then use those paths as the `field` argument in `search_in_space`.
 
 ## Recommended Workflow
 
+### When you need to collect a field across many datasets (most common)
+
 1. `list_spaces` → find the space ID for the area of interest
 2. `get_metadata_fields(space_id)` → discover available field paths and example values
-3. `search_in_space(query, space_id, field=...)` → find matching datasets
-4. `get_dataset_metadata(dataset_id)` → read full metadata for a dataset
-5. `get_dataset_files(dataset_id)` → list raw files if needed
+3. `search_and_collect(query, space_id, fields=[...], size=100)` → search and extract specific fields from all matching datasets in one call
+4. Check `path_warnings` in the response — if non-empty, a field path is wrong (usually missing `[]`). Fix and retry before using the results.
+5. Check `total_size` vs `count` — if `total_size > count`, paginate (see below).
+6. `get_dataset_files(dataset_id)` → list raw files if needed
+
+**Prefer `search_and_collect` over calling `search_in_space` + `get_dataset_metadata` in a loop.**
+The loop approach makes N separate API calls and returns huge JSON blobs that fill the context window.
+`search_and_collect` does the fan-out server-side and returns only the fields you ask for.
+
+### Pagination with search_and_collect
+
+`search_and_collect` returns at most 50 datasets per call. Always check whether you have all results:
+
+```
+if response["total_size"] > response["count"] + response["from_index"]:
+    # more pages exist — fetch next page
+    search_and_collect(..., from_index=response["from_index"] + response["count"], size=50)
+```
+
+**Rule: keep paginating until `from_index + count >= total_size`.** Collect all pages before summarizing — partial results will give the user an incomplete picture.
+
+Example for 120 total matches:
+- Call 1: `from_index=0,  size=50` → count=50,  total_size=120 → more pages
+- Call 2: `from_index=50, size=50` → count=50,  total_size=120 → more pages
+- Call 3: `from_index=100, size=50` → count=20, total_size=120 → done
+
+### When you need full metadata for a single known dataset
+
+1. `get_dataset_metadata(dataset_id)` → full metadata for one dataset
+2. `get_dataset_files(dataset_id)` → list raw files if needed
+
+### When you only need dataset names/IDs (no metadata)
+
+1. `search_in_space(query, space_id, field=...)` → returns id, name, description, url only
 
 ---
 
